@@ -71,13 +71,11 @@ vector<double> solveODEWithAccuracy(double a, double b, double y0, double eps, i
 
     do {
         iterations++;
-        //n *= 2;
-        //cout << "Iteration " << iterations << ": n = " << n << endl;
 
         y_prev = rungeKuttaThirdOrder(a, b, y0, n);
         y_curr = rungeKuttaThirdOrder(a, b, y0, 2*n-1);
 
-        n = 2*n-1;
+        n = 2*n-1; // Новое число узлов, чтобы шаг уменьшился в 2 раза
         cout << "Iteration " << iterations << ": n = " << n << endl;
 
         max_error = 0;
