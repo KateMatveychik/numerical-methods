@@ -61,40 +61,59 @@ vector<double> rungeKuttaThirdOrder(double a, double b, double y0, int n) {
     return y;
 }
 
+//Решение задачи Коши по правилу Рунге
+vector<double> solveODEWithAccuracy(double a, double b, double y0, double eps, int n, int &max_iterations_out) {
+    vector<double> X(n);
+    vector<double> Y(n);
 
-vector<double> solveODEWithAccuracy(double a, double b, double y0, double eps, int initial_n = 2) {
-    int n = initial_n;
-    vector<double> y_prev, y_curr;
-    double max_error;
-    int max_iterations = 100; // Защита от бесконечного цикла
-    int iterations = 0;
+    double h_total = (b - a) / (n - 1); // шаг равномерной сетки
+    X[0] = a;
+    Y[0] = y0;
 
-    do {
-        iterations++;
+    int global_max_iterations = 0;
 
-        y_prev = rungeKuttaThirdOrder(a, b, y0, n);
-        y_curr = rungeKuttaThirdOrder(a, b, y0, 2*n-1);
+    for (int i = 0; i < n - 1; ++i) {
+        double x = X[i];
+        double y = Y[i];
+        double x_next = X[i] + h_total; // конец текущего подотрезка
 
-        n = 2*n-1; // Новое число узлов, чтобы шаг уменьшился в 2 раза
-        cout << "Iteration " << iterations << ": n = " << n << endl;
+        double h = h_total; // начальный адаптивный шаг
+        int local_iterations = 0;
 
-        max_error = 0;
-        for (int i = 0; i < y_prev.size(); ++i) {
-            int j = 2 * i;
-            if (j < y_curr.size()) {
-                double error = fabs(y_prev[i] - y_curr[j]) / 7.0;
-                if (error > max_error) {
-                    max_error = error;
-                }
+        while (x < x_next) {
+            local_iterations++;
+
+            if (x + h > x_next)
+                h = x_next - x; // последний шаг точно до конца подотрезка
+
+            double y_h = rungeKuttaStep(x, y, h);
+
+            double hh = h / 2;
+            double y_half = rungeKuttaStep(x, y, hh);
+            double y_h2 = rungeKuttaStep(x + hh, y_half, hh);
+
+            double err = fabs(y_h2 - y_h) / 7.0; // правило Рунге (p=3)
+
+            if (err <= eps) {
+                // шаг точный — принимаем и двигаемся дальше
+                x += h;
+                y = y_h2;
+            } else {
+                // ошибка слишком большая — уменьшаем шаг
+                h /= 2.0;
             }
         }
-        cout << "Current error: " << max_error << " (target: " << eps << ")" << endl;
 
-    } while (max_error > eps && iterations < max_iterations);
+        if (local_iterations > global_max_iterations)
+            global_max_iterations = local_iterations;
 
-    return y_curr;
+        X[i + 1] = x_next;
+        Y[i + 1] = y;
+    }
+
+    max_iterations_out = global_max_iterations;
+    return Y;
 }
-
 
 
 
@@ -122,8 +141,8 @@ void runControlTests() {
 
     // Тест а: два значения шага (h2 = h1/2)
     {
-        int n1 = 5; // Количество узлов для h1 (h1 = 0.5)
-        int n2 = 9; // Количество узлов для h2 (h2 = 0.25)
+        int n1 = 9; // Количество узлов для h1 (h1 = 0.25)
+        int n2 = 17; // Количество узлов для h2 (h2 = 0.125)
 
         vector<double> x1 = nodes(a, b, n1);
         vector<double> y1 = rungeKuttaThirdOrder(a, b, y0, n1);
@@ -159,7 +178,7 @@ void runControlTests() {
         h_file << scientific << setprecision(12);
         h_p_file << scientific << setprecision(12);
 
-        vector<int> n_values = {6, 11, 21, 41, 81, 161, 321, 641};
+        vector<int> n_values = {41, 81, 161, 321, 641, 1281};
         for (int n : n_values) {
             double h = (b - a) / (n - 1);
             vector<double> y = rungeKuttaThirdOrder(a, b, y0, n);
@@ -186,24 +205,36 @@ void runControlTests() {
         ofstream eps_error_file("eps_vs_actual_error.txt");
         ofstream eps_iter_file("eps_vs_iterations.txt");
         vector<double> epsilons = {1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7};
+        double a = -1.0;
+        double b = 1.0;
+        double y0 = exp(1.0);
+        int n = 5; // число узлов равномерной сетки (для всех опытов одинаковое)
 
         for (double eps : epsilons) {
-            vector<double> y = solveODEWithAccuracy(a, b, y0, eps);
-            double h = (b - a) / (y.size() - 1);
+            int max_iter = 0;
+            vector<double> y = solveODEWithAccuracy(a, b, y0, eps, n, max_iter);
+            double h = (b - a) / (n - 1);
 
-            // Вычисляем фактическую ошибку
+            // Вычисляем фактическую максимальную ошибку
             double max_actual_error = 0;
-            for (int i = 0; i < y.size(); ++i) {
+            for (int i = 0; i < n; ++i) {
                 double x = a + i * h;
-                max_actual_error = max(max_actual_error, fabs(y[i] - exactSolution(x)));
+                double exact = exp(-x);
+                double error = fabs(y[i] - exact);
+                if (error > max_actual_error)
+                    max_actual_error = error;
             }
 
-            // Число итераций
-            int iterations = log2(y.size());
-
             eps_error_file << eps << "\t" << max_actual_error << endl;
-            eps_iter_file << eps << "\t" << iterations << endl;
+            eps_iter_file << eps << "\t" << max_iter << endl;
+
+            cout << "eps = " << eps
+                 << "  max_error = " << max_actual_error
+                 << "  max_iter = " << max_iter << endl;
         }
+
+        eps_error_file.close();
+        eps_iter_file.close();
     }
 
 
